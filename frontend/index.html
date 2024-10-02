@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安卓端聚焦标注工具</title>
+    <link rel="stylesheet" href="index.css">
+    <link rel="stylesheet" href="layui/css/layui.css">
+    <link rel="stylesheet" href="//unpkg.com/element-plus/dist/index.css" />
+    <script src="//unpkg.com/vue@3"></script>
+    <script src="//unpkg.com/element-plus"></script>
+    <script src="layui/layui.js"></script>
+</head>
+<body>
+    <div id="app">
+        <h1 class="page-title">安卓端聚焦标注工具（基于视图树）</h1>
+        <div class="layui-bg-gray">
+            <div class="layui-row layui-col-space15">
+                <div class="layui-col-md1"></div>
+                <div class="layui-col-md3">
+                    <div class="layui-form">
+                        <input type="radio" name="page_filter" value="-1" title="全部" checked>
+                        <input type="radio" name="page_filter" value="0" title="未标注">
+                        <input type="radio" name="page_filter" value="1" title="已标注">
+                    </div>
+                    <table class="layui-hide" id="table-page"></table>
+                    <div id="laypage-limits"></div>
+
+                    <div class="layui-panel">
+                        <div style="padding: 32px; font-size: 16px;">
+                            <i class="layui-icon layui-icon-question"></i> 
+                            标注方式：<b style="color: red;">单击</b> 右侧视图树中的结点（行）即标记该结点为 <b style="color: green;">可聚焦</b>，默认所有结点均为 <b>不可聚焦</b>
+                            <p style="margin-top: 20px;"><mark>注意点</mark></p>
+                            <ol>
+                                <li>1. 结点行支持 <b>鼠标 hover</b> 交互，鼠标 <b>进入时</b> 会依据所选结点坐标在页面截图中 <b style="color: green;">绘制绿色聚焦框</b></li>
+                                <li>2. 单击标注后，结点坐标表示的 <b style="color: green;">绿色聚焦框</b> 会 <b style="color: green;">常驻</b>，再次单击结点行可 <b>撤销标注</b></li>
+                                <li>3. 单击标注后，再次通过 <b>鼠标 hover</b>，此时聚焦框颜色会变为 <b style="color: red;">红色</b>，表示该结点为 <b style="color: red;">已标注结点</b></li>
+                                <li>4. 单击标注后，通过 <b>鼠标 hover</b> <b style="color: purple;">同坐标但不同 ID 的结点</b>，此时聚焦框颜色会变为 <b style="color: purple;">紫色</b>，<b style="color: purple;">表示该结点的坐标处已有其他结点被标注</b></li>
+                                <li>5. 右侧视图树上方可对结点行的标注状态进行筛选，且默认会隐藏 <b style="color: gray;">不合法结点</b>（坐标为负数/超出边界/间距非正数）</li>
+                                <li>6. 整个页面的结点标注完成后，点击图像上方的 <button type="button" id="check-button" class="layui-btn">提交</button> 进行提交</li>
+                                <li>7. 左上方的列表为所有需要标注的数据，会区分 <b style="color: green;">已标注页面</b> 和 <b style="color: blue;">未标注页面</b>，已标注页面点击 <button type="button" id="label-button" class="layui-btn">检查</button> 可以查看标注结果，未标注页面点击 <button type="button" id="label-button" class="layui-btn layui-bg-blue">标注</button> 可以打开标注页面</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+                <div class="layui-col-md3">
+                    <div class="layui-card">
+                        <div class="layui-card-header screen-header">
+                            <span id="screen-header-text">页面截图</span>
+                            <span class="node-count">总结点数：{{ totalCnt }}</span>
+                            <span class="node-count">合法结点数：{{ validCnt }}</span>
+                            <span class="node-count">已标注结点数：{{ labelledPageIds.size }}</span>
+                            <div class="screen-button">
+                                <button type="button" id="check-button" class="layui-btn"
+                                    onclick="submitLabel()">提交</button>
+                            </div>
+                        </div>
+                        <div class="layui-card-body">
+                            <div class="page-image-container" oncontextmenu="return false;">
+                                <img id="page-image" src="" alt="页面截图" style="height: 1000px;" />
+                                <canvas id="page-canvas"></canvas>
+                            </div>
+                            <p style="margin-top: 15px;">右击搜索当前位置相关结点：{{ searchResult }}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="layui-col-md4">
+                    <div class="layui-card">
+                        <div class="layui-card-header">
+                            <div class="layui-form focus-checkbox-container">
+                                <button type="button" class="layui-btn layui-btn-normal layui-btn-sm layui-bg-red" onclick="resetLabel()">重置</button>
+                                <button type="button" id="pre-label-by-rule-button" class="layui-btn layui-btn-normal layui-btn-sm" onclick="preLabelByRule()" onmouseover="preLabelByRuleTip()">规则预标</button>
+                                <button type="button" id="pre-label-by-algo-button" class="layui-btn layui-btn-normal layui-btn-sm" onclick="preLabelByAlgo()" onmouseover="preLabelByAlgoTip()">算法预标</button>
+                            </div>
+                            视图树
+                            <div class="layui-form focus-checkbox-container">
+                                <input class="focus-filter-checkbox" lay-filter="checkbox-filter" type="checkbox" value="-1" id="invalid-checkbox" name="invalid-checkbox" title="不合法">
+                                <input class="focus-filter-checkbox" lay-filter="checkbox-filter" type="checkbox" value="0" id="unfocusable-checkbox" name="unfocusable-checkbox" title="标注不可聚焦" checked>
+                                <input class="focus-filter-checkbox" lay-filter="checkbox-filter" type="checkbox" value="1" id="focusable-checkbox" name="focusable-checkbox" title="标注可聚焦" checked>
+                            </div>
+                        </div>
+                        <div class="layui-card-body">
+                            <el-scrollbar :height="viewTreeHeight">
+                                <el-tree 
+                                    ref="treeRef" 
+                                    id="view-tree" 
+                                    :data="treeData" 
+                                    :props="defaultProps" 
+                                    :filter-node-method="filterNode"
+                                    node-key="id"  
+                                    :default-expand-all="true"
+                                    :expand-on-click-node="false"
+                                    @node-click="handleNodeClick" 
+                                >
+                                <template #default="{ node, data }">
+                                    <span class="custom-tree-node" 
+                                        @mouseenter="handleMouseEnter(data)"
+                                        @mouseleave="handleMouseLeave(data)">
+                                    <span v-html="data.label"></span>
+                                </template>
+                                </el-tree>
+                            </el-scrollbar>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+<script src="index.js"></script>
+</html>

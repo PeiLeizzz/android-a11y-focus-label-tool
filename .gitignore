@@ -1,0 +1,8 @@
+.vscode/
+.idea/
+*.png
+*.log
+*.jpg
+*.json
+*.npy
+__pycache__/

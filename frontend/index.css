@@ -1,0 +1,91 @@
+.page-title {
+    margin-top: 20px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.screen-button {
+    display: inline;
+    float: right;
+}
+
+#switch-check-state-button {
+    display: none;
+}
+
+#label-button {
+    height: 28px;
+    line-height: 20px;
+}
+
+#check-button {
+    height: 28px;
+    line-height: 20px;
+}
+
+.page-image-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+}
+
+.page-image {
+    height: 1000px;
+}
+
+#page-canvas {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.focus-checkbox-container {
+    display: inline;
+    float: right;
+}
+
+.label-button-container {
+    margin-bottom: 10px;
+}
+
+.invalid-node > .el-tree-node__content {
+    color: gray;
+    text-decoration: line-through
+}
+
+.unfocusable-node > .el-tree-node__content {
+    color: black;
+}
+
+.focusable-node > .el-tree-node__content {
+    color: green;
+}
+
+#invalid-checkbox+.layui-form-checked>i {
+    border-color: grey !important;
+    background-color: grey;
+}
+
+#unfocusable-checkbox+.layui-form-checked>i {
+    border-color: black !important;
+    background-color: black;
+}
+
+#focusable-checkbox+.layui-form-checked>i {
+    border-color: green !important;
+    background-color: green;
+}
+
+.view-tree {
+    max-height: 600px;
+}
+
+.el-tree > .el-tree-node {
+    display: inline-block;
+}
+
+.node-count {
+    margin-left: 10px;
+}
