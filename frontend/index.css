@@ -89,3 +89,12 @@
 .node-count {
     margin-left: 10px;
 }
+
+.high-prob {
+    color: rgba(8, 8, 236, 0.659);
+}
+
+.low-prob {
+    color: rgb(251, 77, 2);
+    font-weight: bold;
+}

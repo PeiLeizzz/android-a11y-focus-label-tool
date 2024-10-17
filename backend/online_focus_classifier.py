@@ -9,7 +9,7 @@ class_num = 2
 model = torchvision.models.resnet50()
 model.fc = nn.Linear(model.fc.in_features, class_num)
 if torch.cuda.is_available():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.load_state_dict(torch.load(weight_path, map_location=device))
 else:
     device = torch.device("cpu")

@@ -1,11 +1,14 @@
 const searchParams = new URLSearchParams(window.location.search);
 const page_id = parseInt(searchParams.get("page_id"));
+let batch = searchParams.get("batch");
+if (!batch) {
+    batch = 'batch0';
+}
 const backend_url = "http://10.130.128.31:15000";
 
 const { createApp, ref, watch, reactive } = Vue;
 const lineWidth = 4;
 const body = document.querySelector("body");
-const batch = 'batch0'
 
 const app = createApp({
     setup() {
@@ -84,13 +87,13 @@ const app = createApp({
                 // 先画当前的框
                 // 优先级：red > purple > green
                 ctx.beginPath();
-                ctx.lineWidth = lineWidth;
+                ctx.lineWidth = 8;
                 if (labelledPageIds.has(data.id)) {
                     ctx.strokeStyle = "red";
                 } else if (labelledCoordinators.has(key)) {
                     ctx.strokeStyle = "purple";
                 } else {
-                    ctx.strokeStyle = "green";
+                    ctx.strokeStyle = "blue";
                 }
                 ctx.rect(
                     coordinator.x,
@@ -176,6 +179,7 @@ image.onload = function () {
     canvas.height = image.height;
     canvas.xratio = canvas.width / phone_width;
     canvas.yratio = canvas.height / phone_height;
+    reloadCode(page_id);
 };
 
 function isEmpty(obj) {
@@ -194,15 +198,15 @@ function json2node(node) {
         node.screen_bottom,
     ];
     bottom = Math.min(bottom, phone_height - extra_bottom);
+    right = Math.min(right, phone_width)
     let valid =
         left >= 0 &&
         right >= 0 &&
         top >= 0 &&
         bottom >= 0 &&
         top < phone_height - extra_bottom &&
-        right <= phone_width &&
-        left < right &&
-        top < bottom;
+        left < right - 5 &&
+        top < bottom - 5;
     vm.totalCnt++;
     if (valid) {
         vm.validCnt++;
@@ -222,6 +226,9 @@ function json2node(node) {
         father: node.father,
         children: [],
         focusable_label: node.focusable_label ? node.focusable_label : false,
+        focusable_shouldFocusNode: node.focusable_shouldFocusNode ? node.focusable_shouldFocusNode : false,
+        focusable_isAccessibilityFocusable: node.focusable_isAccessibilityFocusable ? node.focusable_isAccessibilityFocusable : false,
+        is_web_node: node.is_web_node ? node.is_web_node : false,
     };
     if (!node.text || isEmpty(node.text)) {
         resNode.text = "";
@@ -351,14 +358,14 @@ layui.use("table", function () {
     // 创建渲染实例
     table.render({
         elem: "#table-page",
-        url: `${backend_url}/get/list`, // 此处为静态模拟数据，实际使用时需换成真实接口
+        url: `${backend_url}/get/list?batch=${batch}`, // 此处为静态模拟数据，实际使用时需换成真实接口
         page: {
             layout: ["count", "prev", "page", "next", "skip", "refresh"], //自定义分页布局
             groups: 5, //只显示 1 个连续页码
             limit: 10,
             jump: function (obj, first) {
                 if (!first) {
-                    const url = `${backend_url}/get/list`;
+                    const url = `${backend_url}/get/list?batch=${batch}`;
                     fetch(url, {
                         method: "GET",
                         mode: "cors",
@@ -471,6 +478,7 @@ function submitLabel() {
         method: "POST",
         mode: "cors",
         body: JSON.stringify({
+            batch: batch,
             page_id: page_id,
             label: [...vm.labelledPageIds.keys()],
         }),
@@ -494,12 +502,12 @@ function submitLabel() {
 
 function gotoLabel(page_id) {
     let cur = window.location.href.split("?")[0];
-    window.open(`${cur}?page_id=${page_id}`);
+    window.open(`${cur}?page_id=${page_id}&batch=${batch}`);
 }
 
 function gotoCheck(page_id) {
     let cur = window.location.href.split("?")[0];
-    window.open(`${cur}?page_id=${page_id}`);
+    window.open(`${cur}?page_id=${page_id}&batch=${batch}`);
 }
 
 function resetLabel() {
@@ -531,6 +539,12 @@ function dfsResetNodeLabel(node) {
         return;
     }
     node.focusable_label = false;
+    if (node.label.includes('[p:')) {
+        // <span class="high-prob">[p: x.yz]</span>
+        let st = node.label.indexOf('<span');
+        let en = node.label.indexOf('span>') + 'span>'.length;
+        node.label = node.label.substring(0, st) + node.label.substring(en);
+    }
     for (let child of node.children) {
         dfsResetNodeLabel(child);
     }
@@ -555,19 +569,39 @@ function preLabelByRule() {
     );
 }
 
-function dfsPreLabelNode(node, preLabelSet=null) {
+const min_p = 0.5, max_p = 0.8;
+function dfsPreLabelNode(node, preLabelSet=null, preLabelProb=null) {
     if (!node) {
         return;
     }
-    if (preLabelSet != null) {
-        node.focusable_label = preLabelSet.has(node.id)
+    if (node.valid) {
+        if (preLabelSet != null) {
+            node.focusable_label = preLabelSet.has(node.id)
+            if (preLabelProb != null) {
+                let p = preLabelProb[node.id];
+                let high_p = p > max_p;
+                let prefix = '<b style="color: red; font-size: 20px;">';
+                let suffix = '</b>';
+                if (node.label.includes(prefix)) {
+                    node.label = `${prefix}<span class=${high_p ? 'high-prob' : 'low-prob'}>[p: ${p}] </span>${node.label.substring(prefix.length, node.label.length - suffix.length)}${suffix}`
+                } else {
+                    node.label = `<span class=${high_p ? 'high-prob' : 'low-prob'}>[p: ${p}] </span>${node.label}`
+                }
+            }
+        } else if (page_id < 0) {
+            // rico 只能靠规则
+            node.focusable_label =
+                node.valid &&
+                (node.focusable ||
+                    node.clickable ||
+                    !isEmptyStr(node.text) ||
+                    !isEmptyStr(node.content_description));
+        } else {
+            // a11y 用 talkback 的结果
+            node.focusable_label = (node.is_web_node && node.focusable_isAccessibilityFocusable) || (!node.is_web_node && node.focusable_shouldFocusNode)
+        }
     } else {
-        node.focusable_label =
-            node.valid &&
-            (node.focusable ||
-                node.clickable ||
-                !isEmptyStr(node.text) ||
-                !isEmptyStr(node.content_description));
+        node.focusable_label = false;
     }
 
     if (node.focusable_label) {
@@ -591,7 +625,7 @@ function dfsPreLabelNode(node, preLabelSet=null) {
         }
     }
     for (let child of node.children) {
-        dfsPreLabelNode(child, preLabelSet);
+        dfsPreLabelNode(child, preLabelSet, preLabelProb);
     }
 }
 
@@ -610,7 +644,7 @@ function drawBoxes() {
     ctx.stroke();
 }
 
-function preLabelByAlgo() {
+function preLabelByAlgoBase(url) {
     let layer = layui.layer;
     layer.confirm(
         "预标前会将当前所有标注清空，是否确定？",
@@ -621,7 +655,6 @@ function preLabelByAlgo() {
         },
         function () {
             let load_index = layer.load(0, {shade: false});
-            const url = `${backend_url}/get/prelabel/algo?page_id=${page_id}`
             fetch(url, {
                 method: "GET",
                 mode: "cors",
@@ -637,7 +670,49 @@ function preLabelByAlgo() {
                 layer.close(load_index); 
                 layer.msg("预标完成", { icon: 1 });
             })
-            .catch((error) => console.error("Error:", error));
+            .catch((error) => {
+                console.error("Error:", error)
+                layer.close(load_index); 
+                layer.msg("预标出现错误", { icon: 2 });
+            });
+        },
+        function () {}
+    );
+}
+
+function preLabelByAlgo() {
+    preLabelByAlgoBase(`${backend_url}/get/prelabel/algo?page_id=${page_id}&batch=${batch}`);
+}
+
+function preLabelByAlgoV2() {
+    const url = `${backend_url}/get/prelabel/algo/v2?page_id=${page_id}&batch=${batch}`;
+    let layer = layui.layer;
+    layer.confirm(
+        "预标前会将当前所有标注清空，是否确定？",
+        {
+            title: '提示',
+            icon: 3,
+            btn: ["确定", "关闭"],
+        },
+        function () {
+            let load_index = layer.load(0, {shade: false});
+            fetch(url, {
+                method: "GET",
+                mode: "cors",
+            })
+            .then((data) => data.json())
+            .then((data) => {
+                doReset();
+                dfsPreLabelNode(vm.treeData[0], new Set(data.labels), data.probs);
+                drawBoxes();
+                layer.close(load_index); 
+                layer.msg("预标完成", { icon: 1 });
+            })
+            .catch((error) => {
+                console.error("Error:", error)
+                layer.close(load_index); 
+                layer.msg("预标出现错误", { icon: 2 });
+            });
         },
         function () {}
     );
@@ -646,7 +721,7 @@ function preLabelByAlgo() {
 function preLabelByRuleTip() {
     let layer = layui.layer;
     layer.tips(
-        "标注 focusable 为 True / clickable 为 True / 含有 text 属性 / 含有 content-description 属性的结点",
+        "按照 Talkback 规则进行标注，或标注 focusable 为 True / clickable 为 True / 含有 text 属性 / 含有 content-description 属性的结点",
         "#pre-label-by-rule-button",
         { tips: [1, "black"], time: 3000 }
     );
@@ -654,7 +729,15 @@ function preLabelByRuleTip() {
 
 function preLabelByAlgoTip() {
     let layer = layui.layer;
-    layer.tips("通过分类算法过滤 focusable 为 True / clickable 为 True / 含有 text 属性 / 含有 content-description 属性的结点", "#pre-label-by-algo-button", {
+    layer.tips("通过分类算法（纯视觉）过滤 focusable 为 True / clickable 为 True / 含有 text 属性 / 含有 content-description 属性的结点", "#pre-label-by-algo-button", {
+        tips: [1, "black"],
+        time: 3000,
+    });
+}
+
+function preLabelByAlgoTipV2() {
+    let layer = layui.layer;
+    layer.tips("通过分类算法（多模态）预测应该聚焦的结点", "#pre-label-by-algo-button", {
         tips: [1, "black"],
         time: 3000,
     });
@@ -842,5 +925,12 @@ function dfsMouseInNode(node, node_ids, x, y) {
     }
 }
 
+function openPrevPage() {
+    let cur = window.location.href.split("?")[0];
+    window.open(`${cur}?page_id=${page_id - 1}&batch=${batch}`);
+}
 
-reloadCode(page_id);
+function openNextPage() {
+    let cur = window.location.href.split("?")[0];
+    window.open(`${cur}?page_id=${page_id + 1}&batch=${batch}`);
+}

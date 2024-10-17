@@ -14,7 +14,11 @@
 </head>
 <body>
     <div id="app">
-        <h1 class="page-title">安卓端聚焦标注工具（基于视图树）</h1>
+        <div class="page-title">
+            <button type="button" style="margin-right: 20px; margin-bottom: 12px;" class="layui-btn layui-bg-purple" onclick="openPrevPage()">上一项数据</button>
+            <h1 style="display: inline;">安卓端聚焦标注工具（基于视图树）</h1>
+            <button type="button" style="margin-left: 6px; margin-bottom: 12px;" class="layui-btn layui-bg-purple" onclick="openNextPage()">下一项数据</button>
+        </div>
         <div class="layui-bg-gray">
             <div class="layui-row layui-col-space15">
                 <div class="layui-col-md1"></div>
@@ -72,6 +76,7 @@
                                 <button type="button" class="layui-btn layui-btn-normal layui-btn-sm layui-bg-red" onclick="resetLabel()">重置</button>
                                 <button type="button" id="pre-label-by-rule-button" class="layui-btn layui-btn-normal layui-btn-sm" onclick="preLabelByRule()" onmouseover="preLabelByRuleTip()">规则预标</button>
                                 <button type="button" id="pre-label-by-algo-button" class="layui-btn layui-btn-normal layui-btn-sm" onclick="preLabelByAlgo()" onmouseover="preLabelByAlgoTip()">算法预标</button>
+                                <button type="button" id="pre-label-by-algo-button" class="layui-btn layui-btn-normal layui-btn-sm" onclick="preLabelByAlgoV2()" onmouseover="preLabelByAlgoTipV2()">算法预标v2</button>
                             </div>
                             视图树
                             <div class="layui-form focus-checkbox-container">

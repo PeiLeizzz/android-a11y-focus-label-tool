@@ -2,38 +2,45 @@ import glob
 import json
 import os
 
+import a11y_mlp_classifier
 import online_focus_classifier
 from flask import Flask, request
 from flask_cors import CORS
 from PIL import Image
 
 app = Flask(__name__)
-app.config["STATIC_FOLDER"] = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "static"
-)
-batch = "batch0"
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+app.config["STATIC_FOLDER"] = static_dir
 CORS(app)
 
-total_page_ids = set()
-not_labelled_page_ids = set()
-labelled_page_ids = set()
+total_page_ids_map = {}
+not_labelled_page_ids_map = {}
+labelled_page_ids_map = {}
+exclude_dirs = set("bad_data")
 
 
 def load_all_page():
-    global total_page_ids, not_labelled_page_ids, labelled_page_ids, batch
-    dataset_dir = f"./static/{batch}"
-    for json_file in glob.glob(os.path.join(dataset_dir, "*.json")):
-        page_id = int(json_file.split("/")[-1].split(".")[0])
+    for d in os.listdir(static_dir):
+        if d in exclude_dirs:
+            continue
 
-        total_page_ids.add(page_id)
-        if os.path.exists(f"{dataset_dir}/labelled/{page_id}.json"):
-            labelled_page_ids.add(page_id)
-        else:
-            not_labelled_page_ids.add(page_id)
+        total_page_ids_map[d] = set()
+        not_labelled_page_ids_map[d] = set()
+        labelled_page_ids_map[d] = set()
 
-    labelled_dir = f"{dataset_dir}/labelled"
-    if not os.path.exists(labelled_dir):
-        os.mkdir(labelled_dir)
+        dataset_dir = os.path.join(static_dir, d)
+        for json_file in glob.glob(os.path.join(dataset_dir, "*.json")):
+            page_id = int(json_file.split("/")[-1].split(".")[0])
+
+            total_page_ids_map[d].add(page_id)
+            if os.path.exists(f"{dataset_dir}/labelled/{page_id}.json"):
+                labelled_page_ids_map[d].add(page_id)
+            else:
+                not_labelled_page_ids_map[d].add(page_id)
+
+        labelled_dir = os.path.join(dataset_dir, "labelled")
+        if not os.path.exists(labelled_dir):
+            os.mkdir(labelled_dir)
 
 
 load_all_page()
@@ -46,17 +53,24 @@ def hello_world():
 
 @app.route("/post/label", methods=["POST"])
 def save_label():
-    global batch
     body = request.json
     page_id = int(body["page_id"])
     label = body["label"]
+    batch = body["batch"]
+
+    if not os.path.exists(f"./static/{batch}"):
+        return (
+            {"code": 1, "msg": f"no such batch: {batch}"},
+            404,
+            {"Content-Type": "application/json"},
+        )
 
     with open(f"./static/{batch}/labelled/{page_id}.json", "w", encoding="utf-8") as f:
         json.dump(label, f)
 
-    if page_id in not_labelled_page_ids:
-        not_labelled_page_ids.remove(page_id)
-        labelled_page_ids.add(page_id)
+    if page_id in not_labelled_page_ids_map[batch]:
+        not_labelled_page_ids_map[batch].remove(page_id)
+        labelled_page_ids_map[batch].add(page_id)
 
     return {"code": 0, "msg": "success"}, 200, {"Content-Type": "application/json"}
 
@@ -66,23 +80,30 @@ def fetch_list():
     args = request.args
     # -1: all, 0: not labelled, 1: labelled
     filter = int(args.get("filter", -1))
+    batch = args.get("batch")
+
+    if not os.path.exists(f"./static/{batch}"):
+        return (
+            {"code": 1, "msg": f"no such batch: {batch}"},
+            404,
+            {"Content-Type": "application/json"},
+        )
 
     page_ids = []
     if filter == 0:
-        page_ids = list(not_labelled_page_ids)
+        page_ids = list(not_labelled_page_ids_map[batch])
     elif filter == 1:
-        page_ids = list(labelled_page_ids)
+        page_ids = list(labelled_page_ids_map[batch])
     else:
-        page_ids = list(total_page_ids)
+        page_ids = list(total_page_ids_map[batch])
     page_ids.sort()
     return fetch_list_condition(page_ids, args)
 
 
 def fetch_list_condition(page_ids, args):
-    global not_labelled_page_ids, labelled_page_ids
-
     page_no = int(args.get("page", 1)) - 1
     page_sz = int(args.get("limit", 10))
+    batch = args.get("batch")
 
     if page_sz < 0:
         page_sz = 10
@@ -98,16 +119,16 @@ def fetch_list_condition(page_ids, args):
     target_ids = page_ids[st : st + page_sz]
     target_labels, totalNums, validNums, labelledNums = [], [], [], []
     for target_id in target_ids:
-        totalNum, validNum = handleNodeNum(target_id)
+        totalNum, validNum = handleNodeNum(target_id, batch)
         totalNums.append(totalNum)
         validNums.append(validNum)
 
-        if target_id in not_labelled_page_ids:
+        if target_id in not_labelled_page_ids_map[batch]:
             target_labels.append(0)
             labelledNums.append(0)
-        if target_id in labelled_page_ids:
+        if target_id in labelled_page_ids_map[batch]:
             target_labels.append(1)
-            labelledNums.append(handleLabelledNodeNum(target_id))
+            labelledNums.append(handleLabelledNodeNum(target_id, batch))
 
     data = {
         "code": 0,
@@ -124,8 +145,7 @@ def fetch_list_condition(page_ids, args):
     return response, 200, {"Content-Type": "application/json"}
 
 
-def handleNodeNum(page_id):
-    global batch
+def handleNodeNum(page_id, batch):
     extra_bottom = 78 if page_id >= 0 else 168
     phone_height = 1600 if page_id >= 0 else 2560
     phone_width = 720 if page_id >= 0 else 1440
@@ -141,13 +161,13 @@ def handleNodeNum(page_id):
             node["screen_bottom"],
         )
         bottom = min(bottom, phone_height - extra_bottom)
+        right = min(right, phone_width)
         valid = (
             left >= 0
             and right >= 0
             and top >= 0
             and bottom >= 0
             and top < phone_height - extra_bottom
-            and right <= phone_width
             and left < right
             and top < bottom
         )
@@ -159,8 +179,7 @@ def handleNodeNum(page_id):
     return totalNum, validNum
 
 
-def handleLabelledNodeNum(page_id):
-    global batch
+def handleLabelledNodeNum(page_id, batch):
     json_file = f"./static/{batch}/labelled/{page_id}.json"
     if not os.path.exists(json_file):
         return 0
@@ -170,10 +189,16 @@ def handleLabelledNodeNum(page_id):
 
 @app.route("/get/prelabel/algo", methods=["GET"])
 def get_algo_pre_labels():
-    global batch
-
     args = request.args
     page_id = int(args.get("page_id"))
+    batch = args.get("batch")
+
+    if not os.path.exists(f"./static/{batch}"):
+        return (
+            {"code": 1, "msg": f"no such batch: {batch}"},
+            404,
+            {"Content-Type": "application/json"},
+        )
 
     dataset_dir = f"./static/{batch}"
     image_file = (
@@ -212,13 +237,13 @@ def get_algo_pre_labels():
             node["screen_bottom"],
         )
         bottom = min(bottom, phone_height - extra_bottom)
+        right = min(right, phone_width)
         valid = (
             left >= 0
             and right >= 0
             and top >= 0
             and bottom >= 0
             and top < phone_height - extra_bottom
-            and right <= phone_width
             and left < right
             and top < bottom
         )
@@ -246,6 +271,93 @@ def get_algo_pre_labels():
 
     return (
         {"code": 0, "msg": "success", "labels": labels},
+        200,
+        {"Content-Type": "application/json"},
+    )
+
+
+@app.route("/get/prelabel/algo/v2", methods=["GET"])
+def get_algo_pre_labels_v2():
+    args = request.args
+    page_id = int(args.get("page_id"))
+    batch = args.get("batch")
+
+    if not os.path.exists(f"./static/{batch}"):
+        return (
+            {"code": 1, "msg": f"no such batch: {batch}"},
+            404,
+            {"Content-Type": "application/json"},
+        )
+
+    dataset_dir = f"./static/{batch}"
+    image_file = (
+        f"{dataset_dir}/{page_id}.png"
+        if page_id >= 0
+        else f"{dataset_dir}/{page_id}.jpg"
+    )
+    json_file = f"{dataset_dir}/{page_id}.json"
+
+    if not os.path.exists(image_file) or not os.path.exists(json_file):
+        return (
+            {"code": 1, "msg": "no such page"},
+            404,
+            {"Content-Type": "application/json"},
+        )
+    extra_bottom = 78 if page_id >= 0 else 168
+    phone_height = 1600 if page_id >= 0 else 2560
+    phone_width = 720 if page_id >= 0 else 1440
+
+    page_image = Image.open(image_file)
+    # png 4 通道，转成 rgb
+    if ".png" in image_file:
+        page_image = page_image.convert("RGB")
+    w, h = page_image.size
+    x_ratio = w / phone_width
+    y_ratio = h / phone_height
+    with open(json_file, "r", encoding="utf-8") as f:
+        nodes = json.load(f)["nodes"]
+
+    valid_nodes = []
+    labels = []
+    for node in nodes:
+        left, right, top, bottom = (
+            node["screen_left"],
+            node["screen_right"],
+            node["screen_top"],
+            node["screen_bottom"],
+        )
+        bottom = min(bottom, phone_height - extra_bottom)
+        right = min(right, phone_width)
+        valid = (
+            left >= 0
+            and right >= 0
+            and top >= 0
+            and bottom >= 0
+            and top < phone_height - extra_bottom
+            and left < right
+            and top < bottom
+        )
+        if not valid:
+            continue
+
+        node["algo_coordinator"] = [
+            int(left * x_ratio),
+            int(right * x_ratio),
+            int(top * y_ratio),
+            int(bottom * y_ratio),
+        ]
+        node["normal_algo_cooridnator"] = [
+            left / phone_width,
+            right / phone_width,
+            top / phone_height,
+            bottom / phone_height,
+        ]
+        valid_nodes.append(node)
+
+    labels, probs = a11y_mlp_classifier.pred_model(page_image, valid_nodes)
+
+    return (
+        {"code": 0, "msg": "success", "labels": labels, "probs": probs},
         200,
         {"Content-Type": "application/json"},
     )
